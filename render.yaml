@@ -17,14 +17,6 @@ services:
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
 
-    # Persistent disk so ChromaDB, SQLite and uploaded docs survive restarts.
-    # Paths below are relative to the backend/ working directory, so
-    # ../data/persist resolves to the mounted disk.
-    disk:
-      name: persist
-      mountPath: /opt/render/project/src/data/persist
-      sizeGB: 1
-
     envVars:
       # Provider settings
       - key: LLM_PROVIDER
@@ -43,11 +35,12 @@ services:
         value: admin
       - key: DEFAULT_ADMIN_PASSWORD
         value: admin123
-      # Persist state on the mounted disk
+      # Storage paths (ephemeral on Render's free tier - ChromaDB, SQLite
+      # and uploaded docs are reset whenever the service restarts or redeploys)
       - key: DATABASE_URL
-        value: sqlite:///../data/persist/chatbot.db
+        value: sqlite:///./chatbot.db
       - key: CHROMA_DIR
-        value: ../data/persist/chroma_db
+        value: ./chroma_db
       # Sample documents live in the repo and are auto-indexed on first start
       - key: DATA_DIR
         value: ../data/medical_documents
