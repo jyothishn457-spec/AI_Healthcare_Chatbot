@@ -1,0 +1,53 @@
+# Render Blueprint - deploy the backend with one click.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# To deploy:
+#   1. Create a free account at https://render.com
+#   2. New +  ->  Blueprint  ->  connect this GitHub repo
+#   3. Render reads this file, create the service, and asks you to fill in
+#      the GEMINI_API_KEY secret (marked sync: false). Paste your key.
+#   4. Deploy. The service URL looks like https://ai-healthcare-backend.onrender.com
+services:
+  - type: web
+    name: ai-healthcare-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+
+    # Persistent disk so ChromaDB, SQLite and uploaded docs survive restarts.
+    # Paths below are relative to the backend/ working directory, so
+    # ../data/persist resolves to the mounted disk.
+    disk:
+      name: persist
+      mountPath: /opt/render/project/src/data/persist
+      sizeGB: 1
+
+    envVars:
+      # Provider settings
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      # Secrets - fill these in the Render dashboard (never store in git)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      # Auto-created admin login
+      - key: DEFAULT_ADMIN_USERNAME
+        value: admin
+      - key: DEFAULT_ADMIN_PASSWORD
+        value: admin123
+      # Persist state on the mounted disk
+      - key: DATABASE_URL
+        value: sqlite:///../data/persist/chatbot.db
+      - key: CHROMA_DIR
+        value: ../data/persist/chroma_db
+      # Sample documents live in the repo and are auto-indexed on first start
+      - key: DATA_DIR
+        value: ../data/medical_documents
