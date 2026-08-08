@@ -79,9 +79,14 @@ def _index_new_documents() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    database.init_db()
-    _ensure_default_admin()
-    _index_new_documents()
+    # Any startup problem (DB init, missing API key, vector store) must never
+    # prevent the server from booting - log it and continue serving requests.
+    try:
+        database.init_db()
+        _ensure_default_admin()
+        _index_new_documents()
+    except Exception as exc:  # pragma: no cover
+        print(f"[startup] Non-fatal startup issue: {exc}")
     yield
 
 
