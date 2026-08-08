@@ -1,33 +1,70 @@
-# Session Progress — save point
+# AI Healthcare Chatbot — Deployed State
 
-Last updated: Aug 08 2026. Backend is DEPLOYED and LIVE. Two things remain: verify frontend deploy, and walk through cleanup/next steps.
+Last updated: Aug 08 2026. **Everything is deployed and verified working end to end.**
 
-## Status
+## Live URLs
 
-- Backend live at **https://ai-healthcare-backend-jxmh.onrender.com** (auto-deploy on, `main` branch).
-- Frontend = separate Render **Static Site** (created via dashboard, NOT in render.yaml). Backend only service is defined in `render.yaml`.
+- **Frontend:** https://ai-healthcare-frontend-9x04.onrender.com
+- **Backend API:** https://ai-healthcare-backend-jxmh.onrender.com (health: `/health` returns `{"status":"ok"}`)
+- **API docs (Swagger):** https://ai-healthcare-backend-jxmh.onrender.com/docs
 
-## What was fixed this session (all committed & pushed to `main`)
+## How they connect
 
-1. `64cf385` — render.yaml: use current blueprint fields (`autoDeployTrigger: commit`, `healthCheckPath: /health`).
-2. `c570a1d` — **Fixed Render build failure.** Root cause: Render defaults to Python 3.14, which has no prebuilt wheels for our 2024-era Rust-based deps (`onnxruntime`, `pydantic-core`, `tokenizers`, `tiktoken`) -> pip builds from source -> needs Cargo -> `Read-only file system` on `/usr/local/cargo/...`. Fix: added `PYTHON_VERSION: "3.12.11"` env var to render.yaml. All deps now install from wheels.
-3. `250562c` — Frontend now points at the live backend. Added `frontend/.env.production`:
-   - `VITE_API_URL=https://ai-healthcare-backend-jxmh.onrender.com`
-   - No `/api` prefix — backend routes are at root (see backend/main.py: `/login`, `/chat`, `/history`, `/upload`, etc.).
-   - CORS is already permissive (`allow_origins=["*"]` in main.py), no backend change needed.
-   - In dev, `src/api.js` falls back to `/api` (Vite proxy in `vite.config.js` -> localhost:8000).
+- Frontend is a Render **static site** (`ai-healthcare-frontend`, `runtime: static`, builds `frontend/` -> `dist`).
+- At build time, Vite bakes `VITE_API_URL=https://ai-healthcare-backend-jxmh.onrender.com` into the JS bundle
+  (from `frontend/.env.production` AND the `VITE_API_URL` env var in render.yaml — verified present in the served bundle).
+- `src/api.js` uses that as the axios base URL. Backend routes live at the root (no `/api` prefix):
+  `/login`, `/register`, `/chat`, `/history`, `/upload`, `/documents`.
+- Backend CORS is permissive (`allow_origins=["*"]`), so cross-origin calls from the frontend work.
+- In local dev the Vite proxy (`vite.config.js`) sends `/api/*` -> `http://localhost:8000`; no config needed.
 
-## PENDING (next session)
+## Tech stack
 
-1. **Frontend redeploy / verify** — push `250562c` should have auto-triggered the static site rebuild (auto-deploy on, connected to this repo). Vite loads `.env.production` automatically on `npm run build`, so no dashboard env var needed.
-   - Check Render dashboard -> frontend static site -> Deploys -> last deploy built from `250562c`.
-2. **Verify E2E** once frontend is live (frontend URL not yet known — user was going to paste it):
-   - Open frontend, log in with `admin` / `admin123` (auto-created; see render.yaml DEFAULT_ADMIN_*).
-   - Send a chat message; confirm AI answers.
-   - Confirm no CORS errors in browser console.
-3. **Known Render free-tier limitations to remember:** ChromaDB, SQLite, and uploaded docs live in ephemeral storage — reset on every restart/redeploy. Sample docs in `data/medical_documents` are re-indexed on first start (DATA_DIR env).
-4. **No secrets committed.** GEMINI_API_KEY and OPENAI_API_KEY are `sync: false` in render.yaml — must be filled in the Render dashboard.
+### Backend (Python / FastAPI)
+- `fastapi==0.115.6`, `uvicorn[standard]==0.34.0`, `pydantic==2.10.4`
+- LangChain `0.3.14` (`langchain-community`, `langchain-core`, `langchain-text-splitters`)
+- LLM providers: `langchain-openai` / `langchain-google-genai` + `google-generativeai` (LLM_PROVIDER is `gemini`)
+- Vector DB: `chromadb==0.5.23` (RAG embeddings)
+- Document loaders: `pypdf`, `python-docx`, `python-multipart`
+- Auth: `PyJWT`, `cryptography` (PBKDF2 hashing + JWT)
+- SQLite via `DATABASE_URL` (users, chat history, doc index)
 
-## Local quick-start (already built in)
+### Frontend (React / Vite)
+- React 18.3, react-router-dom 6.28, axios 1.7
+- Vite 5.4 (`npm run build` -> `dist`)
+- Features: JWT login, dashboard, chat UI, voice input (Web Speech), text-to-speech, dark mode, SOS modal,
+  admin document upload/list/delete
 
-- `start_app.bat` at repo root launches backend + frontend locally. Local dev backend runs on port 8000, frontend on 5173.
+## Deployment setup (render.yaml)
+
+Two services in the Render Blueprint (root of repo):
+
+1. **ai-healthcare-backend** — `type: web`, `runtime: python`, `rootDir: backend`, free plan,
+   `buildCommand: pip install -r requirements.txt`,
+   `startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT`, `healthCheckPath: /health`.
+   - `PYTHON_VERSION: "3.12.11"` (critical: Render's default 3.14 lacks wheels for Rust-based deps ->
+     source build -> Cargo missing -> `Read-only file system` build failure).
+   - Secrets `GEMINI_API_KEY`, `OPENAI_API_KEY` are `sync: false` (set in dashboard, not in git);
+     `SECRET_KEY` auto-generated.
+   - `DEFAULT_ADMIN_USERNAME=admin`, `DEFAULT_ADMIN_PASSWORD=admin123` (change in production!).
+2. **ai-healthcare-frontend** — `type: web`, `runtime: static`, `rootDir: frontend`, no plan field
+   (static sites are free / no instance type), `buildCommand: npm install && npm run build`,
+   `staticPublishPath: ./dist`, `envVars: VITE_API_URL=<backend URL>`.
+
+Both `autoDeployTrigger: commit` on `main`.
+
+## Verification performed (end-to-end)
+
+- Frontend serves HTTP 200 with the MediCare AI app.
+- Served JS bundle contains the live backend URL.
+- Backend `/health` returns `{"status":"ok"}`.
+- `POST /login` with `admin`/`admin123` returns a valid JWT + user object.
+- Next manual check: open the frontend, log in, send a chat message and confirm the AI answers.
+
+## Important notes / limitations
+
+- **Free-tier ephemeral storage:** ChromaDB, SQLite (`chatbot.db`) and uploaded docs reset on every
+  restart/redeploy. Sample docs in `data/medical_documents` are re-indexed on first start (`DATA_DIR`).
+- **No secrets in git.** If keys ever need changing, update them in the Render dashboard.
+- **Default admin password is public** (`admin123`) — change it before real use.
+- Local quick-start: `START_SERVERS.bat` at repo root launches backend (port 8000) + frontend (5173).
