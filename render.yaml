@@ -20,6 +20,11 @@ services:
     healthCheckPath: /health
 
     envVars:
+      # Pin Python to 3.12: Render's default (3.14) has no prebuilt wheels for
+      # our pinned Rust-based deps (onnxruntime, pydantic-core, tokenizers,
+      # tiktoken), forcing a from-source build that needs Cargo and fails.
+      - key: PYTHON_VERSION
+        value: "3.12.11"
       # Provider settings
       - key: LLM_PROVIDER
         value: gemini
