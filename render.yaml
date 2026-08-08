@@ -1,12 +1,13 @@
-# Render Blueprint - deploy the backend with one click.
+# Render Blueprint - deploy backend + frontend.
 # Docs: https://render.com/docs/blueprint-spec
 #
 # To deploy:
 #   1. Create a free account at https://render.com
 #   2. New +  ->  Blueprint  ->  connect this GitHub repo
-#   3. Render reads this file, create the service, and asks you to fill in
+#   3. Render reads this file, creates both services, and asks you to fill in
 #      the GEMINI_API_KEY secret (marked sync: false). Paste your key.
-#   4. Deploy. The service URL looks like https://ai-healthcare-backend.onrender.com
+#   4. Deploy. Backend URL: https://ai-healthcare-backend-<rand>.onrender.com
+#      Frontend URL:  https://ai-healthcare-frontend-<rand>.onrender.com
 services:
   - type: web
     name: ai-healthcare-backend
@@ -51,3 +52,19 @@ services:
       # Sample documents live in the repo and are auto-indexed on first start
       - key: DATA_DIR
         value: ../data/medical_documents
+
+  # Frontend - React (Vite) static site.
+  - type: web
+    name: ai-healthcare-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    branch: main
+    autoDeployTrigger: commit
+
+    envVars:
+      # Base URL of the deployed backend (no /api prefix - routes live at root).
+      - key: VITE_API_URL
+        value: https://ai-healthcare-backend-jxmh.onrender.com
