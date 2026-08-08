@@ -67,18 +67,22 @@ def get_llm():
     return ChatOpenAI(model=model, api_key=api_key, temperature=0.3)
 
 
-def generate_answer(question: str, user_id: int | None = None) -> str:
+def generate_answer(
+    question: str, user_id: int | None = None
+) -> tuple[str, list[str]]:
     """
     Generate a grounded answer for a user question.
 
-    The question and answer are saved to the user's chat history
-    when a user_id is provided.
+    Returns ``(answer, sources)`` where ``sources`` is the ordered list of
+    document filenames the answer was drawn from (empty when no knowledge
+    base matched). The question and answer are saved to the user's chat
+    history when a user_id is provided.
     """
     if user_id:
         add_chat_message(user_id, "user", question)
 
     # Step 1 - RAG: retrieve the most relevant document chunks.
-    context = retrieve_context(question)
+    context, sources = retrieve_context(question)
 
     # Step 2 - Generation: feed the context to the LLM and stream the result.
     prompt = ChatPromptTemplate.from_messages(
@@ -90,5 +94,5 @@ def generate_answer(question: str, user_id: int | None = None) -> str:
     answer = result.content if hasattr(result, "content") else str(result)
 
     if user_id:
-        add_chat_message(user_id, "assistant", answer)
-    return answer
+        add_chat_message(user_id, "assistant", answer, sources=sources)
+    return answer, sources

@@ -108,16 +108,20 @@ def index_document(file_path: str) -> int:
     return len(chunks)
 
 
-def retrieve_context(query: str, k: int = RETRIEVAL_K) -> str:
-    """Return the top-k most relevant document chunks for a query.
+def retrieve_context(query: str, k: int = RETRIEVAL_K) -> tuple[str, list[str]]:
+    """Return ``(context, sources)`` for a query.
 
-    Returns an empty string when there is no knowledge base yet or when
-    retrieval fails, so the chatbot can fall back to general knowledge.
+    ``context`` is the top-k most relevant document chunks formatted for the
+    LLM prompt; ``sources`` is the ordered, de-duplicated list of document
+    filenames those chunks came from (used for citations in the UI).
+
+    Returns ``("", [])`` when there is no knowledge base yet or when retrieval
+    fails, so the chatbot can fall back to general knowledge.
     """
     try:
         collection = get_collection()
         if collection.count() == 0:
-            return ""
+            return "", []
 
         embeddings = get_embeddings()
         result = collection.query(
@@ -128,10 +132,13 @@ def retrieve_context(query: str, k: int = RETRIEVAL_K) -> str:
         documents = (result.get("documents") or [[]])[0]
         metadatas = (result.get("metadatas") or [[]])[0]
     except Exception:
-        return ""
+        return "", []
 
     pieces = []
+    sources: list[str] = []
     for doc, meta in zip(documents, metadatas or []):
         source = (meta or {}).get("source", "unknown")
         pieces.append(f"[Source: {source}]\n{doc}")
-    return "\n\n".join(pieces)
+        if source not in sources:
+            sources.append(source)
+    return "\n\n".join(pieces), sources

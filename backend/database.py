@@ -11,6 +11,7 @@ All functions use a lock because sqlite3 connections are not thread-safe by
 default and FastAPI serves requests from a thread pool.
 """
 
+import json
 import os
 import sqlite3
 import threading
@@ -55,6 +56,7 @@ def init_db() -> None:
                     user_id    INTEGER NOT NULL,
                     role       TEXT NOT NULL,  -- 'user' or 'assistant'
                     message    TEXT NOT NULL,
+                    sources    TEXT NOT NULL DEFAULT '[]',  -- JSON list of source files
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 );
@@ -69,6 +71,15 @@ def init_db() -> None:
                 """
             )
             conn.commit()
+
+            # Migrate existing databases that predate the sources column.
+            try:
+                conn.execute(
+                    "ALTER TABLE chat_history ADD COLUMN sources TEXT NOT NULL DEFAULT '[]'"
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
         finally:
             conn.close()
 
@@ -116,14 +127,22 @@ def get_user_by_id(user_id: int) -> dict | None:
 
 
 # ------------------------------------------------------------------ chat history
-def add_chat_message(user_id: int, role: str, message: str) -> None:
-    """Store a single chat message for a user."""
+def add_chat_message(
+    user_id: int, role: str, message: str, sources: list | None = None
+) -> None:
+    """Store a single chat message for a user.
+
+    ``sources`` is an optional list of document filenames the assistant's
+    answer was drawn from; it is stored as JSON so citations survive reloads.
+    """
+    payload = json.dumps(sources or [])
     with _lock:
         conn = get_connection()
         try:
             conn.execute(
-                "INSERT INTO chat_history (user_id, role, message, created_at) VALUES (?, ?, ?, ?)",
-                (user_id, role, message, _now()),
+                "INSERT INTO chat_history (user_id, role, message, sources, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, role, message, payload, _now()),
             )
             conn.commit()
         finally:
@@ -136,12 +155,20 @@ def get_chat_history(user_id: int, limit: int = 200) -> list[dict]:
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT id, role, message, created_at FROM chat_history "
+                "SELECT id, role, message, sources, created_at FROM chat_history "
                 "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
                 (user_id, limit),
             ).fetchall()
             # rows are newest-first, so reverse them for chronological display
-            return [dict(r) for r in reversed(rows)]
+            result = []
+            for r in reversed(rows):
+                row = dict(r)
+                try:
+                    row["sources"] = json.loads(row.get("sources") or "[]")
+                except (ValueError, TypeError):
+                    row["sources"] = []
+                result.append(row)
+            return result
         finally:
             conn.close()
 

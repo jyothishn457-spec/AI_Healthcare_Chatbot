@@ -433,6 +433,14 @@ body {
   margin: 0;
 }
 
+.source-tag {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--muted);
+  opacity: 0.85;
+}
+
 .tts-btn {
   background: none;
   border: 1px solid var(--primary);

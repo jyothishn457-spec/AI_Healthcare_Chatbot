@@ -42,7 +42,11 @@ const Chat = ({ user }) => {
     api
       .get('/history')
       .then((res) => {
-        const history = res.data.map((m) => ({ role: m.role, content: m.message }))
+        const history = res.data.map((m) => ({
+          role: m.role,
+          content: m.message,
+          sources: m.sources || [],
+        }))
         setMessages(
           history.length > 0 ? history : [{ role: 'assistant', content: welcomeMessage(user.username) }],
         )
@@ -64,7 +68,10 @@ const Chat = ({ user }) => {
     setTyping(true)
     try {
       const { data } = await api.post('/chat', { message: q })
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.response }])
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: data.response, sources: data.sources || [] },
+      ])
     } catch (err) {
       const detail = err.response?.data?.detail
       setMessages((prev) => [
@@ -199,6 +206,11 @@ const Chat = ({ user }) => {
           <div key={i} className={`msg ${m.role}`}>
             <div className="bubble">
               <p>{m.content}</p>
+              {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
+                <div className="source-tag">
+                  Source: {m.sources.join(', ')}
+                </div>
+              )}
               {m.role === 'assistant' && (
                 <button className="tts-btn" onClick={() => speak(m.content)}>
                   {speaking ? 'Stop' : 'Listen'}

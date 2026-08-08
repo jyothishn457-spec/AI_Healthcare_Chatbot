@@ -190,8 +190,8 @@ def chat(body: ChatRequest, request: Request, user=Depends(get_current_user)):
     """Answer a user question using the RAG pipeline."""
     rate_limit(request.client.host)
     try:
-        response = generate_answer(body.message.strip(), user_id=user["id"])
-        return {"response": response}
+        response, sources = generate_answer(body.message.strip(), user_id=user["id"])
+        return {"response": response, "sources": sources}
     except RuntimeError as exc:
         # Raised when an API key is missing / misconfigured.
         raise HTTPException(
