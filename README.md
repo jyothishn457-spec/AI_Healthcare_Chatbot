@@ -18,6 +18,18 @@ Generation (RAG)**.
 
 ---
 
+## Live Demo
+
+| Service  | URL                                                        |
+| -------- | ---------------------------------------------------------- |
+| Frontend | https://ai-healthcare-frontend-9x04.onrender.com            |
+| Backend  | https://ai-healthcare-backend-jxmh.onrender.com            |
+| API docs | https://ai-healthcare-backend-jxmh.onrender.com/docs       |
+
+Log in with `admin` / `admin123`.
+
+---
+
 ## Features
 
 ### Chatbot
@@ -64,10 +76,13 @@ AI_Healthcare_Chatbot/
 │   │   ├── Chat.jsx       # chat UI, voice, TTS, SOS, admin panel
 │   │   ├── api.js         # axios client with JWT interceptor
 │   │   └── styles.css
+│   ├── .env.production    # VITE_API_URL for production builds
 │   ├── package.json
 │   └── README.md
 ├── data/
 │   └── medical_documents/  # sample documents, auto-indexed on startup
+├── render.yaml            # Render Blueprint: backend web service + frontend static site
+├── START_SERVERS.bat      # one-click local launcher
 └── README.md
 ```
 
@@ -176,7 +191,7 @@ Copy `backend/.env.example` to `backend/.env` and edit:
 | `OPENAI_API_KEY`          | OpenAI key (when provider is `openai`)       |
 | `OPENAI_MODEL`            | e.g. `gpt-4o-mini`                           |
 | `GEMINI_API_KEY`          | Gemini key (when provider is `gemini`)       |
-| `GEMINI_MODEL`            | e.g. `gemini-1.5-flash`                      |
+| `GEMINI_MODEL`            | e.g. `gemini-3.5-flash`                       |
 | `DATABASE_URL`            | SQLite location                              |
 | `CHROMA_DIR`              | ChromaDB persistence folder                  |
 | `DATA_DIR`                | Folder auto-indexed on startup               |
@@ -194,21 +209,39 @@ matching API key. Embeddings and the chat model both follow the provider.
 
 ## Deployment
 
-### Backend on Render
-1. Push the repo to GitHub.
-2. On Render, create a new **Web Service** pointing at the repo.
-3. Set the **Root Directory** to `backend`.
-4. Build command: `pip install -r requirements.txt`
-5. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-6. Add the environment variables from `.env.example` (no `.env` file on the server).
+Both services are defined in a single `render.yaml` **Blueprint** at the repo root
+and deploy automatically on every push to `main`.
 
-### Frontend on Vercel
-1. On Vercel, import the repo and set the **Root Directory** to `frontend`.
-2. Framework preset: **Vite** (build command `npm run build`, output `dist`).
-3. Add an environment variable `VITE_API_URL` pointing to the deployed backend,
-   e.g. `https://your-backend.onrender.com`.
-4. In `frontend/src/api.js` the base URL falls back to `/api` when
-   `VITE_API_URL` is not set — configure it to reach your backend.
+### Services
+
+1. **ai-healthcare-backend** — web service, `runtime: python`, `rootDir: backend`,
+   free plan, `uvicorn main:app` on `$PORT`, health check at `/health`.
+   - Pinned `PYTHON_VERSION: 3.12.11` — required because Render's default (3.14)
+     has no prebuilt wheels for the pinned Rust-based deps (`onnxruntime`,
+     `pydantic-core`, `tokenizers`, `tiktoken`), forcing a source build that fails.
+2. **ai-healthcare-frontend** — static site, `runtime: static`, `rootDir: frontend`,
+   `npm install && npm run build`, publishes `./dist`.
+   - `VITE_API_URL` is set to the deployed backend and baked into the JS bundle at
+     build time (also mirrored in `frontend/.env.production`).
+
+### Deploying (one-time setup)
+
+1. Push the repo to GitHub.
+2. On Render: **New + → Blueprint → connect this GitHub repo**.
+3. Render reads `render.yaml`, creates both services, and prompts for the secrets
+   marked `sync: false` (`GEMINI_API_KEY`, `OPENAI_API_KEY`) — paste your keys.
+4. Hit **Apply**. After the first deploy completes, copy each service's
+   `.onrender.com` URL from the dashboard.
+5. Re-sync the Blueprint (`Sync Blueprint`) any time you change `render.yaml`.
+
+### After first deploy
+
+- Fill in `GEMINI_API_KEY` and `OPENAI_API_KEY` in the Render dashboard
+  (Environment page) — they are never stored in git.
+- `DEFAULT_ADMIN_PASSWORD` is `admin123` by default — change it for real use.
+- **Free-tier note:** ChromaDB, SQLite and uploaded documents live in ephemeral
+  storage and are reset whenever the service restarts or redeploys. The sample
+  documents in `data/medical_documents/` are re-indexed automatically on first start.
 
 ---
 
