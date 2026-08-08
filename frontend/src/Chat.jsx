@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { jsPDF } from 'jspdf'
 import api from './api.js'
 
 const EMERGENCY_INFO = {
@@ -94,6 +95,62 @@ const Chat = ({ user }) => {
       /* ignore network errors - the local view still clears */
     }
     setMessages([{ role: 'assistant', content: 'Chat cleared. How can I help you today?' }])
+  }
+
+  // ---------------- Export chat as PDF ----------------
+  const exportPdf = () => {
+    if (messages.length === 0) return
+    const doc = new jsPDF()
+    const margin = 16
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    let y = margin
+
+    // jsPDF's built-in fonts cannot render emoji / non-Latin characters.
+    const sanitize = (text) => text.replace(/[^\x00-\x7F]/g, ' ')
+
+    const pushLines = (lines) => {
+      lines.forEach((line) => {
+        if (y > pageHeight - margin) {
+          doc.addPage()
+          y = margin
+        }
+        doc.text(line, margin, y)
+        y += 6
+      })
+    }
+
+    // Header
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.text('MediCare AI - Chat Transcript', margin, y)
+    y += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(120)
+    doc.text(`${user.username} - ${new Date().toLocaleString()}`, margin, y)
+    y += 10
+    doc.setTextColor(0)
+
+    messages.forEach((m) => {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      pushLines([`${m.role === 'user' ? 'You' : 'MediCare AI'}:`])
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      pushLines(doc.splitTextToSize(sanitize(m.content), pageWidth - margin * 2))
+      if (m.role === 'assistant' && m.sources && m.sources.length > 0) {
+        doc.setFont('helvetica', 'italic')
+        doc.setFontSize(9)
+        doc.setTextColor(100)
+        pushLines([`Source: ${m.sources.join(', ')}`])
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(0)
+      }
+      y += 4
+    })
+
+    doc.save('medi-care-chat-transcript.pdf')
   }
 
   // ---------------- Voice input (Web Speech API) ----------------
@@ -195,6 +252,9 @@ const Chat = ({ user }) => {
               Manage Documents
             </button>
           )}
+          <button className="btn btn-outline btn-sm" onClick={exportPdf}>
+            Export PDF
+          </button>
           <button className="btn btn-outline btn-sm" onClick={clearChat}>
             Clear Chat
           </button>
