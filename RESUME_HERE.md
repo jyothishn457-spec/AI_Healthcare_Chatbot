@@ -2,6 +2,28 @@
 
 Last updated: Aug 08 2026. **Everything is deployed and verified working end to end.**
 
+## New features added (Aug 08 2026, all committed & pushed)
+
+1. **Source citations** (`ce842e2`) — the `/chat` endpoint now returns a `sources`
+   array of the document filenames the answer was drawn from; the UI shows a
+   `Source: filename` tag under each AI answer.
+   - Backend: `rag_pipeline.retrieve_context()` returns `(context, sources)`;
+     `chatbot.generate_answer()` returns `(answer, sources)`; sources are persisted
+     in a new `chat_history.sources` JSON column (with an ALTER TABLE migration for
+     existing DBs in `database.init_db()`); `/chat` returns `{"response", "sources"}`.
+   - Frontend: `Chat.jsx` stores/renders `m.sources`; new `.source-tag` style.
+   - Tested with FastAPI TestClient (real `generate_answer` path, mocked LLM +
+     retrieval) — citations returned AND survive `/history` reload.
+2. **Export chat as PDF** (`34a4d27`) — "Export PDF" button in the chat header
+   downloads the current conversation as `medi-care-chat-transcript.pdf`.
+   - Uses `jspdf` (added to dependencies). Multi-page aware, includes speaker
+     labels, timestamps and source citations; non-ASCII/emoji sanitized for the
+     built-in fonts. Verified via a Node script generating a valid PDF buffer.
+3. **Dark mode persistence** (`be65870`) — theme now defaults to the OS
+   `prefers-color-scheme` on first visit, then the user's toggle is saved in
+   `localStorage['theme']` and reused across sessions (`App.jsx`).
+   - Note: persistence already existed; this adds the system-preference default.
+
 ## Live URLs
 
 - **Frontend:** https://ai-healthcare-frontend-9x04.onrender.com
