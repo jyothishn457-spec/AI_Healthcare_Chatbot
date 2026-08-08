@@ -28,7 +28,14 @@ function Navbar({ user, dark, onToggleDark, onLogout }) {
 
 export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || 'null'))
-  const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
+
+  // Dark mode: use the saved choice if present, otherwise fall back to the
+  // operating system preference so first-time visitors get a consistent theme.
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('theme')
+    if (saved === 'dark' || saved === 'light') return saved === 'dark'
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+  })
 
   // Toggle the .dark class on <html> so the CSS variables switch theme.
   useEffect(() => {
