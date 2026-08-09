@@ -1,7 +1,10 @@
+// Login / Register - auth page that stores access + refresh tokens.
 import React, { useState } from 'react'
-import api from './api.js'
+import { useNavigate } from 'react-router-dom'
+import api, { saveSession } from '../api.js'
 
-const Login = ({ onLogin }) => {
+const Login = () => {
+  const navigate = useNavigate()
   const [mode, setMode] = useState('login') // 'login' | 'register'
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -15,7 +18,8 @@ const Login = ({ onLogin }) => {
     try {
       const url = mode === 'login' ? '/login' : '/register'
       const { data } = await api.post(url, { username, password })
-      onLogin(data.user, data.token)
+      saveSession(data)
+      navigate('/', { replace: true })
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong. Please try again.')
     } finally {
@@ -28,8 +32,8 @@ const Login = ({ onLogin }) => {
       <div className="auth-card">
         <div className="auth-head">
           <div className="logo large">+</div>
-          <h1>MediCare AI</h1>
-          <p>Your intelligent healthcare assistant</p>
+          <h1>HealthPilot AI</h1>
+          <p>Your AI-powered medical assistant</p>
         </div>
 
         <form onSubmit={submit} className="auth-form">
@@ -57,7 +61,7 @@ const Login = ({ onLogin }) => {
           </label>
           {error && <div className="error">{error}</div>}
           <button className="btn btn-primary" disabled={loading}>
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {loading ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
         </form>
 

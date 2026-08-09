@@ -1,6 +1,11 @@
+// AI Doctor Chat - conversation UI with named sessions, persistent disclaimer,
+// typing indicator, source citations, voice input, TTS and PDF export.
 import React, { useEffect, useRef, useState } from 'react'
 import { jsPDF } from 'jspdf'
-import api from './api.js'
+import api from '../api.js'
+import DisclaimerBanner from '../components/DisclaimerBanner.jsx'
+import Modal from '../components/Modal.jsx'
+import { formatDateTime } from '../utils.js'
 
 const EMERGENCY_INFO = {
   title: 'Emergency Resources',
@@ -21,9 +26,11 @@ const SUGGESTIONS = [
 ]
 
 const welcomeMessage = (name) =>
-  `Hello ${name}! I am MediCare AI. Ask me about symptoms, diseases, medicines or preventive care. Remember, I am not a doctor — always consult a healthcare professional for medical advice.`
+  `Hello ${name}! I am HealthPilot AI. Ask me about symptoms, diseases, medicines or preventive care. Remember, I am not a doctor — always consult a healthcare professional for medical advice.`
 
 const Chat = ({ user }) => {
+  const [sessions, setSessions] = useState([])
+  const [activeSession, setActiveSession] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -34,26 +41,72 @@ const Chat = ({ user }) => {
   const [adminOpen, setAdminOpen] = useState(false)
   const [docs, setDocs] = useState([])
   const [adminMsg, setAdminMsg] = useState('')
+  const [bootError, setBootError] = useState('')
 
   const bottomRef = useRef(null)
   const recognitionRef = useRef(null)
 
-  // Load persisted chat history on mount (or show a welcome message).
+  const loadSessions = async () => {
+    try {
+      const { data } = await api.get('/chat/sessions')
+      setSessions(data.sessions || [])
+      return data.sessions || []
+    } catch {
+      return []
+    }
+  }
+
+  // Load sessions on mount; if none exist, create one so there is always a
+  // conversation to write into.
   useEffect(() => {
+    let active = true
+    ;(async () => {
+      const list = await loadSessions()
+      if (!active) return
+      if (list.length === 0) {
+        try {
+          const { data } = await api.post('/chat/sessions')
+          if (!active) return
+          setActiveSession(data.session)
+          setSessions([data.session])
+          setMessages([{ role: 'assistant', content: welcomeMessage(user?.username) }])
+        } catch {
+          if (!active) return
+          setBootError('Could not start a conversation. Is the backend running?')
+          setMessages([{ role: 'assistant', content: welcomeMessage(user?.username) }])
+        }
+      } else {
+        setActiveSession(list[0])
+      }
+    })()
+    return () => { active = false }
+  }, [user?.username])
+
+  // When the active session changes, load its message history.
+  useEffect(() => {
+    if (!activeSession) return
+    let active = true
     api
-      .get('/history')
-      .then((res) => {
-        const history = res.data.map((m) => ({
+      .get(`/chat/sessions/${activeSession.id}`)
+      .then(({ data }) => {
+        if (!active) return
+        const history = (data.messages || []).map((m) => ({
           role: m.role,
           content: m.message,
           sources: m.sources || [],
+          created_at: m.created_at,
         }))
         setMessages(
-          history.length > 0 ? history : [{ role: 'assistant', content: welcomeMessage(user.username) }],
+          history.length > 0
+            ? history
+            : [{ role: 'assistant', content: welcomeMessage(user?.username) }],
         )
       })
-      .catch(() => setMessages([{ role: 'assistant', content: welcomeMessage(user.username) }]))
-  }, [user.username])
+      .catch(() => {
+        if (active) setMessages([{ role: 'assistant', content: welcomeMessage(user?.username) }])
+      })
+    return () => { active = false }
+  }, [activeSession?.id, user?.username])
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -68,11 +121,16 @@ const Chat = ({ user }) => {
     setLoading(true)
     setTyping(true)
     try {
-      const { data } = await api.post('/chat', { message: q })
+      const { data } = await api.post('/chat', { message: q, session_id: activeSession?.id || null })
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: data.response, sources: data.sources || [] },
+        { role: 'assistant', content: data.response, sources: data.sources || [], created_at: new Date().toISOString() },
       ])
+      // If this was a brand-new conversation, the backend created the session.
+      if (!activeSession) {
+        setActiveSession({ id: data.session_id, title: data.session_title })
+      }
+      loadSessions()
     } catch (err) {
       const detail = err.response?.data?.detail
       setMessages((prev) => [
@@ -88,13 +146,41 @@ const Chat = ({ user }) => {
     }
   }
 
-  const clearChat = async () => {
+  const startNewConversation = async () => {
     try {
-      await api.delete('/history')
+      const { data } = await api.post('/chat/sessions')
+      setActiveSession(data.session)
+      setSessions((prev) => [data.session, ...prev])
+      setMessages([{ role: 'assistant', content: welcomeMessage(user?.username) }])
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  const deleteConversation = async () => {
+    if (!activeSession) return
+    if (!window.confirm('Delete this conversation permanently?')) return
+    try {
+      await api.delete(`/chat/sessions/${activeSession.id}`)
+      const list = await loadSessions()
+      if (list.length > 0) setActiveSession(list[0])
+      else {
+        setActiveSession(null)
+        setMessages([{ role: 'assistant', content: welcomeMessage(user?.username) }])
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  const clearChat = async () => {
+    if (!activeSession) return
+    try {
+      await api.delete(`/chat/sessions/${activeSession.id}`)
+      setMessages([{ role: 'assistant', content: 'Chat cleared. How can I help you today?' }])
     } catch (_) {
       /* ignore network errors - the local view still clears */
     }
-    setMessages([{ role: 'assistant', content: 'Chat cleared. How can I help you today?' }])
   }
 
   // ---------------- Export chat as PDF ----------------
@@ -123,19 +209,19 @@ const Chat = ({ user }) => {
     // Header
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(16)
-    doc.text('MediCare AI - Chat Transcript', margin, y)
+    doc.text('HealthPilot AI - Chat Transcript', margin, y)
     y += 6
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     doc.setTextColor(120)
-    doc.text(`${user.username} - ${new Date().toLocaleString()}`, margin, y)
+    doc.text(`${user?.username} - ${new Date().toLocaleString()}`, margin, y)
     y += 10
     doc.setTextColor(0)
 
     messages.forEach((m) => {
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(11)
-      pushLines([`${m.role === 'user' ? 'You' : 'MediCare AI'}:`])
+      pushLines([`${m.role === 'user' ? 'You' : 'HealthPilot AI'}:`])
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
       pushLines(doc.splitTextToSize(sanitize(m.content), pageWidth - margin * 2))
@@ -150,7 +236,7 @@ const Chat = ({ user }) => {
       y += 4
     })
 
-    doc.save('medi-care-chat-transcript.pdf')
+    doc.save('healthpilot-chat-transcript.pdf')
   }
 
   // ---------------- Voice input (Web Speech API) ----------------
@@ -236,18 +322,21 @@ const Chat = ({ user }) => {
   }
 
   useEffect(() => {
-    if (adminOpen && user.is_admin) loadDocs()
-  }, [adminOpen, user.is_admin])
+    if (adminOpen && user?.is_admin) loadDocs()
+  }, [adminOpen, user?.is_admin])
 
   return (
-    <main className="chat-page">
-      <div className="chat-header">
-        <h2>Chat with MediCare AI</h2>
+    <main className="page chat-page">
+      <header className="page-head chat-head">
+        <div>
+          <h1>AI Doctor</h1>
+          <p className="muted">Ask anything about symptoms, conditions or medicines.</p>
+        </div>
         <div className="chat-actions">
           <button className="btn btn-danger btn-sm" onClick={() => setShowEmergency(true)}>
             SOS
           </button>
-          {user.is_admin && (
+          {user?.is_admin && (
             <button className="btn btn-outline btn-sm" onClick={() => setAdminOpen(true)}>
               Manage Documents
             </button>
@@ -258,8 +347,32 @@ const Chat = ({ user }) => {
           <button className="btn btn-outline btn-sm" onClick={clearChat}>
             Clear Chat
           </button>
+          <button className="btn btn-outline btn-sm" onClick={deleteConversation}>
+            Delete Conversation
+          </button>
         </div>
+      </header>
+
+      <DisclaimerBanner />
+
+      {/* Conversation switcher: new vs. continue */}
+      <div className="session-bar">
+        <button className="btn btn-primary btn-sm" onClick={startNewConversation}>
+          + New conversation
+        </button>
+        {sessions.map((s) => (
+          <button
+            key={s.id}
+            className={`chip${activeSession?.id === s.id ? ' chip-active' : ''}`}
+            onClick={() => setActiveSession(s)}
+            title={s.title}
+          >
+            {s.title}
+          </button>
+        ))}
       </div>
+
+      {bootError && <div className="error">{bootError}</div>}
 
       <div className="chat-window">
         {messages.map((m, i) => (
@@ -267,14 +380,15 @@ const Chat = ({ user }) => {
             <div className="bubble">
               <p>{m.content}</p>
               {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
-                <div className="source-tag">
-                  Source: {m.sources.join(', ')}
-                </div>
+                <div className="source-tag">Source: {m.sources.join(', ')}</div>
               )}
               {m.role === 'assistant' && (
                 <button className="tts-btn" onClick={() => speak(m.content)}>
                   {speaking ? 'Stop' : 'Listen'}
                 </button>
+              )}
+              {m.created_at && (
+                <div className="source-tag">{formatDateTime(m.created_at)}</div>
               )}
             </div>
           </div>
@@ -323,60 +437,50 @@ const Chat = ({ user }) => {
           {listening ? 'Listening...' : 'Voice'}
         </button>
         <button className="btn btn-primary" disabled={loading || !input.trim()}>
-          Send
+          {loading ? 'Thinking…' : 'Send'}
         </button>
       </form>
 
-      {showEmergency && (
-        <div className="modal-overlay" onClick={() => setShowEmergency(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{EMERGENCY_INFO.title}</h3>
-            <p className="emergency-note">{EMERGENCY_INFO.note}</p>
-            <ul className="emergency-list">
-              {EMERGENCY_INFO.items.map((it) => (
-                <li key={it.label}>
-                  <strong>{it.label}:</strong> {it.value}
-                </li>
-              ))}
-            </ul>
-            <button className="btn btn-primary" onClick={() => setShowEmergency(false)}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      <Modal open={showEmergency} title={EMERGENCY_INFO.title} onClose={() => setShowEmergency(false)}>
+        <p className="emergency-note">{EMERGENCY_INFO.note}</p>
+        <ul className="emergency-list">
+          {EMERGENCY_INFO.items.map((it) => (
+            <li key={it.label}>
+              <strong>{it.label}:</strong> {it.value}
+            </li>
+          ))}
+        </ul>
+        <button className="btn btn-primary" onClick={() => setShowEmergency(false)}>
+          Close
+        </button>
+      </Modal>
 
-      {adminOpen && user.is_admin && (
-        <div className="modal-overlay" onClick={() => setAdminOpen(false)}>
-          <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-            <h3>Document Management</h3>
-            <label className="upload-box">
-              Upload medical document (PDF / TXT / DOCX)
-              <input type="file" accept=".pdf,.txt,.docx" onChange={uploadFile} />
-            </label>
-            {adminMsg && <div className="error">{adminMsg}</div>}
-            <ul className="doc-list">
-              {docs.map((d) => (
-                <li key={d.id}>
-                  <div>
-                    <strong>{d.filename}</strong>
-                    <span>
-                      {d.chunk_count} chunks &middot; {d.uploaded_at} &middot; by {d.uploader}
-                    </span>
-                  </div>
-                  <button className="btn btn-danger btn-sm" onClick={() => deleteDoc(d.id)}>
-                    Delete
-                  </button>
-                </li>
-              ))}
-              {docs.length === 0 && <li className="muted">No documents uploaded yet.</li>}
-            </ul>
-            <button className="btn btn-outline" onClick={() => setAdminOpen(false)}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      <Modal open={adminOpen} title="Document Management" onClose={() => setAdminOpen(false)} wide>
+        <label className="upload-box">
+          Upload medical document (PDF / TXT / DOCX)
+          <input type="file" accept=".pdf,.txt,.docx" onChange={uploadFile} />
+        </label>
+        {adminMsg && <div className="error">{adminMsg}</div>}
+        <ul className="doc-list">
+          {docs.map((d) => (
+            <li key={d.id}>
+              <div>
+                <strong>{d.filename}</strong>
+                <span>
+                  {d.chunk_count} chunks · {d.uploaded_at} · by {d.uploader}
+                </span>
+              </div>
+              <button className="btn btn-danger btn-sm" onClick={() => deleteDoc(d.id)}>
+                Delete
+              </button>
+            </li>
+          ))}
+          {docs.length === 0 && <li className="muted">No documents uploaded yet.</li>}
+        </ul>
+        <button className="btn btn-outline" onClick={() => setAdminOpen(false)}>
+          Close
+        </button>
+      </Modal>
     </main>
   )
 }

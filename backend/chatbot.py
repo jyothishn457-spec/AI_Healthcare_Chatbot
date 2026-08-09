@@ -68,7 +68,9 @@ def get_llm():
 
 
 def generate_answer(
-    question: str, user_id: int | None = None
+    question: str,
+    user_id: int | None = None,
+    session_id: int | None = None,
 ) -> tuple[str, list[str]]:
     """
     Generate a grounded answer for a user question.
@@ -76,10 +78,11 @@ def generate_answer(
     Returns ``(answer, sources)`` where ``sources`` is the ordered list of
     document filenames the answer was drawn from (empty when no knowledge
     base matched). The question and answer are saved to the user's chat
-    history when a user_id is provided.
+    history (optionally grouped into ``session_id``) when a user_id is
+    provided.
     """
     if user_id:
-        add_chat_message(user_id, "user", question)
+        add_chat_message(user_id, "user", question, session_id=session_id)
 
     # Step 1 - RAG: retrieve the most relevant document chunks.
     context, sources = retrieve_context(question)
@@ -94,5 +97,5 @@ def generate_answer(
     answer = result.content if hasattr(result, "content") else str(result)
 
     if user_id:
-        add_chat_message(user_id, "assistant", answer, sources=sources)
+        add_chat_message(user_id, "assistant", answer, sources=sources, session_id=session_id)
     return answer, sources

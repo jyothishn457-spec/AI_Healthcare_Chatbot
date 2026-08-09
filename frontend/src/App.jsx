@@ -1,33 +1,49 @@
-import React, { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import Login from './Login.jsx'
-import Dashboard from './Dashboard.jsx'
-import Chat from './Chat.jsx'
+// App - application shell: auth state, dark mode, sidebar layout and routing.
+// All non-auth routes are protected and rendered inside the sidebar shell.
+import React, { useCallback, useEffect, useState } from 'react'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { clearSession } from './api.js'
+import Sidebar from './components/Sidebar.jsx'
+import Login from './pages/Login.jsx'
+import Dashboard from './pages/Dashboard.jsx'
+import Chat from './pages/Chat.jsx'
+import Predict from './pages/Predict.jsx'
+import Appointments from './pages/Appointments.jsx'
+import BookAppointment from './pages/BookAppointment.jsx'
+import Records from './pages/Records.jsx'
+import Profile from './pages/Profile.jsx'
 
-function Navbar({ user, dark, onToggleDark, onLogout }) {
-  const navigate = useNavigate()
+// Read the logged-in user from localStorage (kept in sync with api.js).
+const readUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem('user') || 'null')
+  } catch {
+    return null
+  }
+}
+
+function ProtectedLayout({ user, dark, onToggleDark, onLogout, onUserUpdated, children }) {
+  const location = useLocation()
   return (
-    <header className="navbar">
-      <div className="navbar-brand" onClick={() => navigate(user ? '/' : '/login')}>
-        <span className="logo">+</span>
-        <span>MediCare AI</span>
+    <div className="app-shell">
+      <Sidebar
+        user={user}
+        dark={dark}
+        onToggleDark={onToggleDark}
+        onLogout={onLogout}
+        onNavigate={() => {
+          /* close mobile drawer when route changes */
+        }}
+      />
+      <div className="app-content" key={location.pathname}>
+        {children}
       </div>
-      {user && (
-        <nav className="navbar-actions">
-          <Link className="nav-link" to="/">Home</Link>
-          <Link className="nav-link" to="/chat">Chat</Link>
-          <button className="btn btn-outline btn-sm" onClick={onToggleDark} title="Toggle dark mode">
-            {dark ? 'Light Mode' : 'Dark Mode'}
-          </button>
-          <button className="btn btn-danger btn-sm" onClick={onLogout}>Logout</button>
-        </nav>
-      )}
-    </header>
+    </div>
   )
 }
 
 export default function App() {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || 'null'))
+  const [user, setUser] = useState(readUser)
 
   // Dark mode: use the saved choice if present, otherwise fall back to the
   // operating system preference so first-time visitors get a consistent theme.
@@ -43,41 +59,47 @@ export default function App() {
     localStorage.setItem('theme', dark ? 'dark' : 'light')
   }, [dark])
 
-  const handleLogin = (userData, token) => {
-    localStorage.setItem('token', token)
-    localStorage.setItem('user', JSON.stringify(userData))
-    setUser(userData)
-  }
+  const refreshUser = useCallback((profile) => {
+    const next = { ...readUser(), ...profile }
+    localStorage.setItem('user', JSON.stringify(next))
+    setUser(next)
+  }, [])
 
   const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    clearSession()
     setUser(null)
   }
 
   return (
-    <div className="app">
-      <Navbar
-        user={user}
-        dark={dark}
-        onToggleDark={() => setDark((d) => !d)}
-        onLogout={handleLogout}
+    <Routes>
+      <Route
+        path="/login"
+        element={user ? <Navigate to="/" replace /> : <Login />}
       />
-      <Routes>
-        <Route
-          path="/login"
-          element={user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />}
-        />
-        <Route
-          path="/"
-          element={user ? <Dashboard user={user} /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/chat"
-          element={user ? <Chat user={user} /> : <Navigate to="/login" replace />}
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </div>
+      <Route
+        path="/*"
+        element={
+          user ? (
+            <ProtectedLayout user={user} dark={dark} onToggleDark={() => setDark((d) => !d)} onLogout={handleLogout} onUserUpdated={refreshUser}>
+              <Routes>
+                <Route path="/" element={<Dashboard user={user} />} />
+                <Route path="/chat" element={<Chat user={user} />} />
+                <Route path="/predict" element={<Predict />} />
+                <Route path="/appointments" element={<Appointments />} />
+                <Route path="/book" element={<BookAppointment />} />
+                <Route path="/records" element={<Records />} />
+                <Route
+                  path="/profile"
+                  element={<Profile user={user} dark={dark} onToggleDark={() => setDark((d) => !d)} onLogout={handleLogout} refreshUser={refreshUser} />}
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </ProtectedLayout>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+    </Routes>
   )
 }
